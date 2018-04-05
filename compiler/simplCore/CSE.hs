@@ -276,6 +276,23 @@ We could try and be careful by tracking which join points are still valid at
 each subexpression, but since join points aren't allocated or shared, there's
 less to gain by trying to CSE them.
 
+Another way how CSE for joint points is tricky is
+
+  let join foo x = (x, 42)
+      join bar x = (x, 42)
+  in … jump foo 1 … jump bar 2 …
+
+naively, CSE would turn this into
+
+  let join foo x = (x, 42)
+      join bar = foo
+  in … jump foo 1 … jump bar 2 …
+
+but now bar is a join point with join-arity one, but a right-hand side that is
+not a lambda (came up in #15002)
+
+Eventually we might want to teach CSE to handle join points (#13219)
+
 Note [CSE for recursive bindings]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Consider
@@ -353,6 +370,9 @@ cse_bind toplevel env (in_id, in_rhs) out_id
       -- See Note [Take care with literal strings]
   = (env', (out_id, in_rhs))
 
+  | noCSE in_id
+  = (env', (out_id, in_rhs))
+
   | otherwise
   = (env', (out_id', out_rhs))
   where
@@ -370,7 +390,6 @@ addBinding :: CSEnv                      -- Includes InId->OutId cloning
 -- Note [Type-let] in CoreSyn), in which case we can just substitute.
 addBinding env in_id out_id rhs'
   | not (isId in_id) = (extendCSSubst env in_id rhs',     out_id)
-  | noCSE in_id      = (env,                              out_id)
   | use_subst        = (extendCSSubst env in_id rhs',     out_id)
   | otherwise        = (extendCSEnv env rhs' id_expr', zapped_id)
   where
